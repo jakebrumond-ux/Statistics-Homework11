@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Toy Elliptic Curve: Private Key to Public Key</title>
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+</head>
 <style>
 :root{--bg:#fafaf7;--fg:#1d1d1b;--muted:#6b6b66;--card:#fff;--line:#dcdcd4;--accent:#0b6e4f;--key:#fff3c4;
 color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -14,7 +18,14 @@ body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-appl
 main{max-width:720px;margin:0 auto;padding:24px 16px}
 h1{font-size:1.4rem;margin:0 0 4px}
 p.sub{color:var(--muted);margin:0 0 20px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+.card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:20px;
+    margin-bottom:20px;
+    box-shadow:0 2px 8px rgba(0,0,0,.05);
+}
 code{font-family:ui-monospace,Consolas,monospace}
 label{display:inline-block;margin-right:8px}
 input{width:70px;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
@@ -25,22 +36,112 @@ th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);font-
 tr.final td{background:var(--key);font-weight:700}
 .out{font-size:1.2rem;font-weight:700;color:var(--accent)}
 .err{color:#c0392b}
+  h2{
+    margin-top:0;
+    margin-bottom:12px;
+    color:#1f3b64;
+}
+
+canvas{
+    width:100%;
+    max-height:500px;
+}
 </style>
+<head>
 </head>
 <body>
 <main>
-<h1>Private key &rarr; public key (toy elliptic curve)</h1>
-<p class="sub">Curve <code>y&sup2; = x&sup3; + 7 (mod 17)</code>, base point <code>G = (1, 5)</code>. Ethereum uses the same equation shape on secp256k1, with a huge prime.</p>
+
+<h1>Private key → public key (toy elliptic curve)</h1>
+<p class="sub">
+Curve <code>y² = x³ + 7 (mod 17)</code>,
+base point <code>G = (1,5)</code>.
+Ethereum uses the same idea on secp256k1.
+</p>
 
 <div class="card">
+  <h2>01 · Introduction</h2>
+
+  <p>
+    This project demonstrates how a private key generates a
+    public key using elliptic curve scalar multiplication.
+  </p>
+
+  <p>
+    The public key is calculated as:
+  </p>
+
+  <p>
+    <strong>Q = kG</strong>
+  </p>
+
+  <p>
+    where k is the private key and G is the base point.
+  </p>
+</div>
+
+<div class="card">
+  <h2>02 · Toy Curve Parameters</h2>
+
+  <ul>
+    <li>Curve: y² = x³ + 7 (mod 17)</li>
+    <li>Base Point: G = (1, 5)</li>
+    <li>Field Prime: p = 17</li>
+    <li>Example Private Key: k = 6</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h2>03 · Interactive Scalar Multiplication Demo</h2>
+
   <label for="k">Private key k:</label>
   <input id="k" type="number" min="1" value="6">
   <button id="go">Compute Q = kG</button>
+
+  <br><br>
+
+  <div id="info"></div>
 </div>
 
-<div class="card" id="info"></div>
-<div class="card scroll"><table id="steps"></table></div>
-<div class="card" id="result"></div>
+<div class="card scroll">
+  <h2>04 · Scalar Multiplication Steps</h2>
+
+  <table id="steps"></table>
+</div>
+
+<div class="card">
+  <h2>05 · Coordinate Plot of the Toy Curve</h2>
+
+  <p>
+    Each point shown satisfies
+    y² = x³ + 7 (mod 17).
+  </p>
+
+  <canvas id="curveChart"></canvas>
+</div>
+
+<div class="card">
+  <h2>06 · Generated Public Key</h2>
+
+  <div id="result"></div>
+</div>
+
+<div class="card">
+  <h2>07 · Security Discussion</h2>
+
+  <p>
+    Computing the public key Q = kG from a private key k
+    is easy.
+  </p>
+
+  <p>
+    Recovering k from the public key Q is based on the
+    Elliptic Curve Discrete Logarithm Problem (ECDLP),
+    which becomes computationally infeasible on large
+    curves such as secp256k1.
+  </p>
+</div>
+
 </main>
 
 <script>
