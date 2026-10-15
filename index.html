@@ -46,6 +46,7 @@ canvas{
     width:100%;
     max-height:500px;
 }
+select{padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
 </style>
 <head>
 </head>
@@ -142,7 +143,42 @@ Ethereum uses the same idea on secp256k1.
     curves such as secp256k1.
   </p>
 </div>
+<div class="card">
+  <h2>08 · Statistical Exploration</h2>
+  <p>
+    Pick a base point B, then look at the points kB for k = 1 … n−1
+    (n = order of B). Coordinates are treated as 5-bit numbers, so each
+    output is a 10-bit string (x then y).
+  </p>
 
+  <label for="base">Base point B:</label>
+  <select id="base"></select>
+  <button id="statsGo">Analyse</button>
+
+  <p id="statSummary"></p>
+  <div class="scroll"><table id="statTable"></table></div>
+
+  <h3>Frequency of x and y values</h3>
+  <canvas id="histChart"></canvas>
+
+  <h3>Input k vs output coordinates</h3>
+  <canvas id="kxChart"></canvas>
+
+  <h3>Discussion</h3>
+  <p><b>Meaningful for a cryptographic one-way function:</b></p>
+  <ul>
+    <li><b>Easy forward, hard backward.</b> Computing kB is fast, but recovering k is the ECDLP. This hardness is not a statistical property, so no table here can prove or disprove it.</li>
+    <li><b>Apparent uniformity.</b> Over k = 1 … n−1 every point of the subgroup appears exactly once, so the outputs are uniform over the subgroup but not over all 17×17 coordinate pairs. In the toy curve many x values never occur, and bit 4 is almost always 0 because values are at most 16. Real systems encode points carefully for this reason.</li>
+    <li><b>No visible input/output correlation.</b> A near-zero correlation is a useful sanity check, but it does not prove security. The scatter plot shows hidden structure: x(kB) = x((n−k)B), because (n−k)B = −kB.</li>
+  </ul>
+  <p><b>Properties specifically associated with cryptographic hash functions:</b></p>
+  <ul>
+    <li><b>Avalanche effect.</b> Flipping one input bit should flip about half the output bits. Scalar multiplication is not designed for this: (k+1)B = kB + B, so neighbouring inputs give related outputs.</li>
+    <li><b>Collision and second-preimage resistance, fixed-size output for any input, pseudo-random output bits.</b> These are hash design goals. The toy curve has none of them (outputs repeat with period n).</li>
+    <li><b>No algebraic structure.</b> Elliptic-curve multiplication is homomorphic: (k1+k2)B = k1B + k2B. That structure is what makes public-key schemes and signatures possible, and it is exactly what a good hash must not have.</li>
+  </ul>
+  <p><small>All numbers here come from a 17-element field, so they describe the toy curve, not secp256k1. At 256 bits, brute-force or statistical attacks on k are infeasible.</small></p>
+</div>
 </main>
 
 <script>
@@ -289,9 +325,183 @@ function run() {
     `Double-and-add gives ${fmt(fast)} &mdash; ${fmt(slow) === fmt(fast) ? "matches &#10003;" : "mismatch!"}<br>` +
     `<small>Going back (finding k from Q) would mean trying every k: easy here, infeasible with a 256-bit curve (ECDLP).</small>`;
 }
+// ================= STATISTICAL EXPLORATION =================
+const BITS = 5;                       // 17 < 32, so each coordinate fits in 5 bits
+let histChart = null, kxChart = null;
 
+const themeText = () => matchMedia("(prefers-color-scheme: dark)").matches ? "#ecece6" : "#1d1d1b";
+const themeGrid = () => matchMedia("(prefers-color-scheme: dark)").matches ? "#33363b" : "#e6e8ef";
+
+// all finite points on the curve
+function curvePoints() {
+  const pts = [];
+  for (let x = 0; x < P; x++)
+    for (let y = 0; y < P; y++)
+      if (mod(y * y) === mod(x ** 3 + A * x + B)) pts.push({ x, y });
+  return pts;
+}
+
+// order of an arbitrary base point
+function orderOf(Bp) {
+  let acc = Bp, n = 1;
+  while (acc !== INF) { acc = add(acc, Bp); n++; }
+  return n;
+}
+
+const bitsOf = (p) => (p.x << BITS) | p.y;                   // 10-bit output (x then y)
+const popcount = (v) => { let c = 0; while (v) { c += v & 1; v >>= 1; } return c; };
+
+function pearson(a, b) {
+  const n = a.length;
+  const ma = a.reduce((s, v) => s + v, 0) / n, mb = b.reduce((s, v) => s + v, 0) / n;
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < n; i++) {
+    num += (a[i] - ma) * (b[i] - mb);
+    da += (a[i] - ma) ** 2;
+    db += (b[i] - mb) ** 2;
+  }
+  return da && db ? num / Math.sqrt(da * db) : NaN;
+}
+
+// average fraction of the 10 output bits that change when ONE bit of k is flipped
+async function avalanche(fn, n) {
+  const kBits = Math.floor(Math.log2(n - 1)) + 1;
+  let total = 0, count = 0;
+  for (let k = 1; k < n; k++) {
+    const a = await fn(k);
+    for (let i = 0; i < kBits; i++) {
+      const k2 = k ^ (1 << i);
+      if (k2 % n === 0) continue;                 // would give the point at infinity
+      const b = await fn(k2);
+      total += popcount(a ^ b) / (2 * BITS);
+      count++;
+    }
+  }
+  return count ? total / count : NaN;
+}
+
+// baseline: first 10 bits of SHA-256(k), a real cryptographic hash
+async function shaOut(k) {
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(k))));
+  return (d[0] << 2) | (d[1] >> 6);
+}
+
+function fillBaseSelect() {
+  document.getElementById("base").innerHTML = curvePoints().map(p =>
+    `<option value="${p.x},${p.y}"${p.x === 1 && p.y === 5 ? " selected" : ""}>(${p.x}, ${p.y}) &nbsp;order ${orderOf(p)}</option>`
+  ).join("");
+}
+
+async function runStats() {
+  const [bx, by] = document.getElementById("base").value.split(",").map(Number);
+  const Bp = { x: bx, y: by };
+  const n = orderOf(Bp);
+  const summary = document.getElementById("statSummary");
+  const table = document.getElementById("statTable");
+
+  if (histChart) { histChart.destroy(); histChart = null; }
+  if (kxChart) { kxChart.destroy(); kxChart = null; }
+
+  if (n < 4) {
+    summary.textContent = `B = ${fmt(Bp)} has order ${n}: too few multiples for statistics. Pick another base point.`;
+    table.innerHTML = "";
+    return;
+  }
+  summary.textContent = `Analysing kB for k = 1 … ${n - 1} with B = ${fmt(Bp)} (order ${n}).`;
+
+  // outputs
+  const outs = [];
+  for (let k = 1; k < n; k++) outs.push({ k, p: mulFast(k, Bp) });
+  const ks = outs.map(o => o.k), xs = outs.map(o => o.p.x), ys = outs.map(o => o.p.y);
+
+  // frequency of values
+  const countX = Array(P).fill(0), countY = Array(P).fill(0);
+  xs.forEach(v => countX[v]++);
+  ys.forEach(v => countY[v]++);
+
+  // chi-square of x against "uniform over every x that occurs on the curve"
+  const validX = [...new Set(curvePoints().map(p => p.x))];
+  const expX = xs.length / validX.length;
+  const chi = validX.reduce((s, v) => s + (countX[v] - expX) ** 2 / expX, 0);
+
+  // bit distribution (MSB first: x4..x0, y4..y0)
+  const ones = Array(2 * BITS).fill(0);
+  outs.forEach(o => {
+    const v = bitsOf(o.p);
+    for (let b = 0; b < 2 * BITS; b++) if ((v >> b) & 1) ones[b]++;
+  });
+  let bitLine = [];
+  for (let b = 2 * BITS - 1; b >= 0; b--)
+    bitLine.push(`${b >= BITS ? "x" + (b - BITS) : "y" + b}: ${(ones[b] / outs.length).toFixed(2)}`);
+
+  // correlations
+  const rKX = pearson(ks, xs), rKY = pearson(ks, ys);
+  const rNext = pearson(xs.slice(0, -1), xs.slice(1));
+
+  // avalanche: elliptic curve vs SHA-256 baseline
+  const avEC = await avalanche(async (k) => bitsOf(mulFast(k, Bp)), n);
+  let avSHA = NaN;
+  try { avSHA = await avalanche(shaOut, n); } catch (e) { /* crypto.subtle unavailable */ }
+
+  const f = (v) => Number.isFinite(v) ? v.toFixed(3) : "n/a";
+  const rows = [
+    ["Distinct x values reached", `${new Set(xs).size} of ${validX.length} x values on the curve`, "all of them"],
+    ["Distinct y values reached", `${new Set(ys).size} of ${P}`, "all of them"],
+    ["Chi-square of x", `${chi.toFixed(2)} (df = ${validX.length - 1})`, "about df"],
+    ["Correlation r(k, x)", f(rKX), "about 0"],
+    ["Correlation r(k, y)", f(rKY), "about 0"],
+    ["Correlation r(x_k, x_k+1)", f(rNext), "about 0"],
+    ["Fraction of 1s per output bit", bitLine.join(" · "), "about 0.5 each"],
+    ["Avalanche (elliptic curve)", f(avEC), "about 0.5"],
+    ["Avalanche (SHA-256 baseline)", f(avSHA), "about 0.5"]
+  ];
+  table.innerHTML = "<tr><th>property</th><th>measured</th><th>ideal random / hash</th></tr>" +
+    rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("");
+
+  // charts
+  const text = themeText(), grid = themeGrid();
+  histChart = new Chart(document.getElementById("histChart"), {
+    type: "bar",
+    data: {
+      labels: [...Array(P).keys()],
+      datasets: [
+        { label: "x frequency", data: countX, backgroundColor: "#2f5fd0" },
+        { label: "y frequency", data: countY, backgroundColor: "#d9772b" }
+      ]
+    },
+    options: {
+      aspectRatio: 2,
+      scales: {
+        x: { ticks: { color: text }, grid: { color: grid }, title: { display: true, text: "coordinate value", color: text } },
+        y: { beginAtZero: true, ticks: { stepSize: 1, color: text }, grid: { color: grid }, title: { display: true, text: "count", color: text } }
+      },
+      plugins: { legend: { labels: { color: text } } }
+    }
+  });
+
+  kxChart = new Chart(document.getElementById("kxChart"), {
+    type: "scatter",
+    data: {
+      datasets: [
+        { label: "x of kB", data: outs.map(o => ({ x: o.k, y: o.p.x })), backgroundColor: "#2f5fd0", pointRadius: 5 },
+        { label: "y of kB", data: outs.map(o => ({ x: o.k, y: o.p.y })), backgroundColor: "#d9772b", pointRadius: 5 }
+      ]
+    },
+    options: {
+      aspectRatio: 2,
+      scales: {
+        x: { min: 0, max: n, ticks: { stepSize: 1, color: text }, grid: { color: grid }, title: { display: true, text: "private key k", color: text } },
+        y: { min: 0, max: 16, ticks: { stepSize: 1, color: text }, grid: { color: grid }, title: { display: true, text: "coordinate of kB", color: text } }
+      },
+      plugins: { legend: { labels: { color: text, usePointStyle: true } } }
+    }
+  });
+}
 document.getElementById("go").addEventListener("click", run);
 run();
+fillBaseSelect();
+document.getElementById("statsGo").addEventListener("click", runStats);
+runStats();
 </script>
 </body>
 </html>
