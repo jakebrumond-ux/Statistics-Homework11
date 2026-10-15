@@ -174,7 +174,7 @@ Ethereum uses the same idea on secp256k1.
   <p><b>Properties specifically associated with cryptographic hash functions:</b></p>
   <ul>
     <li><b>Avalanche effect.</b> Flipping one input bit should flip about half the output bits. Scalar multiplication is not designed for this: (k+1)B = kB + B, so neighbouring inputs give related outputs.</li>
-    <li><b>Collision and second-preimage resistance, fixed-size output for any input, pseudo-random output bits.</b> These are hash design goals. The toy curve has none of them (outputs repeat with period n).</li>
+    <li><b>Collision and second-preimage resistance, fixed-size output for any input, pseudo-random output bits.</b> These are hash design goals. The toy curve does not realistically exhibit these properties because outputs repeat with period (n)</li>
     <li><b>No algebraic structure.</b> Elliptic-curve multiplication is homomorphic: (k1+k2)B = k1B + k2B. That structure is what makes public-key schemes and signatures possible, and it is exactly what a good hash must not have.</li>
   </ul>
   <p><small>All numbers here come from a 17-element field, so they describe the toy curve, not secp256k1. At 256 bits, brute-force or statistical attacks on k are infeasible.</small></p>
