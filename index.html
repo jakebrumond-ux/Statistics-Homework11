@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Toy Elliptic Curve: Private Key to Public Key</title>
+<style>
+:root{--bg:#fafaf7;--fg:#1d1d1b;--muted:#6b6b66;--card:#fff;--line:#dcdcd4;--accent:#0b6e4f;--key:#fff3c4;
+color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17181a;--fg:#ecece6;--muted:#9a9a92;--card:#212326;--line:#383b3f;--accent:#5fd3a6;--key:#3d3410;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#17181a;--fg:#ecece6;--muted:#9a9a92;--card:#212326;--line:#383b3f;--accent:#5fd3a6;--key:#3d3410;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:720px;margin:0 auto;padding:24px 16px}
+h1{font-size:1.4rem;margin:0 0 4px}
+p.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+code{font-family:ui-monospace,Consolas,monospace}
+label{display:inline-block;margin-right:8px}
+input{width:70px;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
+button{padding:7px 14px;border:0;border-radius:6px;background:var(--accent);color:var(--bg);font:inherit;cursor:pointer}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);font-family:ui-monospace,Consolas,monospace;font-size:.92rem}
+tr.final td{background:var(--key);font-weight:700}
+.out{font-size:1.2rem;font-weight:700;color:var(--accent)}
+.err{color:#c0392b}
+</style>
+</head>
+<body>
+<main>
+<h1>Private key &rarr; public key (toy elliptic curve)</h1>
+<p class="sub">Curve <code>y&sup2; = x&sup3; + 7 (mod 17)</code>, base point <code>G = (1, 5)</code>. Ethereum uses the same equation shape on secp256k1, with a huge prime.</p>
+
+<div class="card">
+  <label for="k">Private key k:</label>
+  <input id="k" type="number" min="1" value="6">
+  <button id="go">Compute Q = kG</button>
+</div>
+
+<div class="card" id="info"></div>
+<div class="card scroll"><table id="steps"></table></div>
+<div class="card" id="result"></div>
+</main>
+
+<script>
+// ---- Toy curve parameters ----
+const P = 17, A = 0, B = 7;
+const G = { x: 1, y: 5 };
+const INF = null; // point at infinity (the "zero" of the group)
+
+const mod = (n) => ((n % P) + P) % P;
+
+// modular inverse via Fermat: a^(P-2) mod P (P is prime)
+function inv(a) {
+  let r = 1, base = mod(a), e = P - 2;
+  while (e > 0) { if (e & 1) r = (r * base) % P; base = (base * base) % P; e >>= 1; }
+  return r;
+}
+
+const onCurve = (p) => p === INF || mod(p.y * p.y) === mod(p.x ** 3 + A * p.x + B);
+const fmt = (p) => p === INF ? "O (infinity)" : `(${p.x}, ${p.y})`;
+
+// ---- Point addition (also handles doubling) ----
+function add(p, q) {
+  if (p === INF) return q;
+  if (q === INF) return p;
+  if (p.x === q.x && mod(p.y + q.y) === 0) return INF;      // P + (-P) = O
+  let lambda;
+  if (p.x === q.x && p.y === q.y) {
+    lambda = mod(3 * p.x * p.x + A) * inv(2 * p.y);          // tangent slope
+  } else {
+    lambda = mod(q.y - p.y) * inv(q.x - p.x);                // chord slope
+  }
+  lambda = mod(lambda);
+  const x3 = mod(lambda * lambda - p.x - q.x);
+  const y3 = mod(lambda * (p.x - x3) - p.y);
+  return { x: x3, y: y3 };
+}
+
+// ---- Faster method: double-and-add ----
+function mulFast(k, p) {
+  let result = INF, addend = p;
+  while (k > 0) {
+    if (k & 1) result = add(result, addend);
+    addend = add(addend, addend);
+    k >>= 1;
+  }
+  return result;
+}
+
+// group order of G (smallest n with nG = O)
+function order() {
+  let acc = G, n = 1;
+  while (acc !== INF) { acc = add(acc, G); n++; }
+  return n;
+}
+
+function run() {
+  const k = parseInt(document.getElementById("k").value, 10);
+  const n = order();
+  document.getElementById("info").innerHTML =
+    `Check: G on curve? <b>${onCurve(G)}</b> &nbsp;|&nbsp; order of G: <b>${n}</b> (so nG = O and keys repeat after k = ${n}).`;
+
+  const table = document.getElementById("steps");
+  const result = document.getElementById("result");
+  if (!Number.isInteger(k) || k < 1) {
+    table.innerHTML = "";
+    result.innerHTML = '<span class="err">Please enter a positive integer k.</span>';
+    return;
+  }
+
+  // slow method: repeated addition, printing G, 2G, ..., kG
+  let rows = "<tr><th>step</th><th>point</th><th>how</th></tr>";
+  let acc = G;
+  for (let i = 1; i <= k; i++) {
+    if (i > 1) acc = add(acc, G);
+    const how = i === 1 ? "G" : (i === 2 ? "G + G (doubling)" : `${i - 1}G + G`);
+    rows += `<tr class="${i === k ? "final" : ""}"><td>${i}G</td><td>${fmt(acc)}</td><td>${how}</td></tr>`;
+  }
+  table.innerHTML = rows;
+
+  const slow = acc, fast = mulFast(k, G);
+  result.innerHTML =
+    `Private key: <code>k = ${k}</code><br>` +
+    `TOY PUBLIC KEY: <span class="out">Q = ${k}G = ${fmt(slow)}</span><br>` +
+    `Double-and-add gives ${fmt(fast)} &mdash; ${fmt(slow) === fmt(fast) ? "matches &#10003;" : "mismatch!"}<br>` +
+    `<small>Going back (finding k from Q) would mean trying every k: easy here, infeasible with a 256-bit curve (ECDLP).</small>`;
+}
+
+document.getElementById("go").addEventListener("click", run);
+run();
+</script>
+</body>
+</html>
